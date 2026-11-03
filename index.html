@@ -1,8 +1,9 @@
 <!DOCTYPE html>
 <html lang="zh-Hant">
 <head>
-<base target="_top">
 <meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>30 秒匿名回饋｜欣莘醫美集團</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@500;700&family=Noto+Sans+TC:wght@400;500&display=swap" rel="stylesheet">
@@ -95,6 +96,7 @@
   .state h2 { font-family: var(--serif); font-size: 24px; margin: 14px 0 8px; }
   .state p { margin: 0; color: var(--muted); font-size: 15px; }
   .mark { width: 64px; height: 64px; margin: 0 auto; border-radius: 50%; background: var(--sage); color: #fff; display: grid; place-items: center; font-size: 30px; }
+  .retry { margin-top: 18px; background: none; border: 1.5px solid var(--rose); color: var(--rose-deep); padding: 10px 22px; border-radius: 12px; font: inherit; cursor: pointer; }
   .done .mark { animation: pop .5s ease-out; }
   @keyframes pop { from { transform: scale(.5); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 
@@ -112,9 +114,17 @@
     <p class="promise" id="promise">不會影響後續優惠，也不會由諮詢師看到個人答案。</p>
   </header>
 
-  <div class="progress" id="progressBar"><i id="progressFill"></i></div>
+  <div id="loading" class="state"><p>表單載入中…</p></div>
 
-  <form id="form" novalidate>
+  <div id="loadError" class="state" hidden>
+    <h2>表單暫時無法載入</h2>
+    <p>請確認網路連線後再試一次。</p>
+    <button class="retry" type="button" onclick="loadConfig()">重新載入</button>
+  </div>
+
+  <div class="progress" id="progressBar" hidden><i id="progressFill"></i></div>
+
+  <form id="form" novalidate hidden>
     <fieldset id="clinicSet">
       <legend>今天在哪間診所諮詢？</legend>
       <div class="chips" id="clinicChips"></div>
@@ -159,14 +169,17 @@
 </div>
 
 <script>
-  // 診所＋諮詢師名單由試算表帶入
-  const CLINICS = <?!= clinicsJson ?>;
-  const PRESET = <?= preset ?>;
+  // ★ 貼上 Apps Script「網頁應用程式」部署網址（結尾是 /exec）
+  const API_URL = 'https://script.google.com/macros/s/AKfycbzDAwqSCjDHVmHBJyBaHysjFdCRU-h8XAhACzXSYfDgky2sfGzHstikF-dje1FlNkRK/exec';
 
   const UNKNOWN = '不記得名字';
   const Q1 = ['價格超過預算','還想比較其他診所','對醫師／技術還不夠有信心','案例／效果沒有打中我','擔心手術風險／恢復期','時間還沒辦法安排','需要跟家人討論','本來就只是先了解','其他'];
   const Q2 = ['價格','醫師','案例','方案','諮詢體驗','都還不錯，只是目前沒打算做'];
   const Q3 = ['很有可能','還會比較','機率不高'];
+
+  // 網址有 ?clinic=診所名稱 → 自動選好並隱藏診所題
+  const PRESET = new URLSearchParams(location.search).get('clinic') || '';
+  let CLINICS = [];
 
   const $ = id => document.getElementById(id);
 
@@ -187,8 +200,6 @@
     list.forEach(v => box.appendChild(chip(name, v, '', type)));
   }
 
-  const vals = name => [...document.querySelectorAll('input[name="' + name + '"]:checked')].map(i => i.value);
-
   function renderConsultants(clinicName) {
     const box = $('consultantChips');
     box.innerHTML = '';
@@ -200,6 +211,7 @@
   }
 
   const val = name => (document.querySelector('input[name="' + name + '"]:checked') || {}).value || '';
+  const vals = name => [...document.querySelectorAll('input[name="' + name + '"]:checked')].map(i => i.value);
 
   function updateProgress() {
     const keys = ['clinic','consultant','q1','q2','q3'];
@@ -207,18 +219,39 @@
     $('progressFill').style.width = (n / keys.length * 100) + '%';
   }
 
-  // 初始化
-  CLINICS.forEach(c => $('clinicChips').appendChild(chip('clinic', c.name)));
-  if (PRESET && CLINICS.some(c => c.name === PRESET)) {
-    // 網址有 ?clinic=診所名稱 → 自動選好並隱藏診所題
-    [...document.querySelectorAll('input[name="clinic"]')].find(i => i.value === PRESET).checked = true;
-    $('clinicSet').hidden = true;
-    renderConsultants(PRESET);
+  async function loadConfig() {
+    $('loading').hidden = false;
+    $('loadError').hidden = true;
+    try {
+      const res = await fetch(API_URL);
+      const data = await res.json();
+      if (!data.ok || !data.clinics.length) throw new Error('no data');
+      CLINICS = data.clinics;
+      init();
+    } catch (e) {
+      $('loading').hidden = true;
+      $('loadError').hidden = false;
+    }
   }
-  renderOptions('q1Chips', 'q1', Q1, 'checkbox');
-  renderOptions('q2Chips', 'q2', Q2);
-  renderOptions('q3Chips', 'q3', Q3);
-  updateProgress();
+
+  function init() {
+    const box = $('clinicChips');
+    box.innerHTML = '';
+    CLINICS.forEach(c => box.appendChild(chip('clinic', c.name)));
+    if (PRESET && CLINICS.some(c => c.name === PRESET)) {
+      [...document.querySelectorAll('input[name="clinic"]')].find(i => i.value === PRESET).checked = true;
+      $('clinicSet').hidden = true;
+      renderConsultants(PRESET);
+    }
+    renderOptions('q1Chips', 'q1', Q1, 'checkbox');
+    renderOptions('q2Chips', 'q2', Q2);
+    renderOptions('q3Chips', 'q3', Q3);
+
+    $('loading').hidden = true;
+    $('form').hidden = false;
+    $('progressBar').hidden = false;
+    updateProgress();
+  }
 
   $('form').addEventListener('change', e => {
     if (e.target.name === 'clinic') renderConsultants(e.target.value);
@@ -231,7 +264,7 @@
     updateProgress();
   });
 
-  $('form').addEventListener('submit', e => {
+  $('form').addEventListener('submit', async e => {
     e.preventDefault();
     const d = {
       clinic: val('clinic'), consultant: val('consultant'),
@@ -249,25 +282,26 @@
 
     const btn = $('submitBtn');
     btn.disabled = true; btn.textContent = '送出中…';
-
-    const fail = msg => {
-      $('err').textContent = '送出沒有成功：' + msg + '，請再按一次送出。';
+    try {
+      const res = await fetch(API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify(d)
+      });
+      const r = await res.json();
+      if (!r.ok) throw new Error(r.error || '系統忙碌');
+      $('form').hidden = true;
+      $('progressBar').hidden = true;
+      $('promise').hidden = true;
+      $('done').hidden = false;
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      $('err').textContent = '送出沒有成功：' + (err.message || '網路連線不穩') + '，請再按一次送出。';
       btn.disabled = false; btn.textContent = '送出回饋';
-    };
-
-    google.script.run
-      .withSuccessHandler(r => {
-        if (!r || !r.ok) return fail((r && r.error) || '系統忙碌');
-        $('form').hidden = true;
-        $('progressBar').hidden = true;
-        $('promise').hidden = true;
-        $('done').hidden = false;
-        window.scrollTo({ top: 0, behavior: 'smooth' });
-      })
-      .withFailureHandler(() => fail('網路連線不穩'))
-      .submitFeedback(d);
+    }
   });
+
+  loadConfig();
 </script>
 </body>
 </html>
-
